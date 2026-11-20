@@ -10,6 +10,11 @@ namespace Volti {
       {"Black", "Preto"},
       {"White", "Branco"},
       {"Language", "Idioma"},
+      {"Detect devices", "Detectar dispositivos"},
+      {"Detection requested", "Detecção solicitada"},
+      {"Show in tray", "Mostrar na bandeja"},
+      {"Bluetooth detection failed", "Falha ao detectar Bluetooth"},
+      {"No presets in range", "Nenhuma opção no intervalo"},
       {"Palette", "Paleta"},
       {"Test notification", "Notificação de teste"},
       {"This is a low battery notification preview.", "Esta é uma prévia do aviso de bateria baixa."},
@@ -35,7 +40,6 @@ namespace Volti {
       {"Battery at ", "Bateria em "},
       {". Connect your device to charge.", ". Conecte o dispositivo para carregar."},
       {"Volti startup", "Inicialização do Volti"},
-      {"Could not remove the old startup task. Run Volti once as administrator to finish migration.", "Não foi possível remover a tarefa antiga. Abra o Volti uma vez como administrador para concluir a migração."},
       {"HID discovery", "Localizador HID"},
       {"Reading...", "Lendo..."},
       {"DELUX battery", "Bateria Delux"},
@@ -48,10 +52,56 @@ namespace Volti {
       {"No response", "Sem resposta"},
       {"Readers", "Leitores"},
     };
+    static readonly Dictionary<string,string> Chinese=new Dictionary<string,string>{
+      {"Detect devices", "检测设备"},
+      {"Detection requested", "已请求检测"},
+      {"Show in tray", "在托盘中显示"},
+      {"Bluetooth detection failed", "蓝牙检测失败"},
+      {"Black", "黑色"},
+      {"White", "白色"},
+      {"Language", "语言"},
+      {"No presets in range", "此范围内没有预设值"},
+      {"Palette", "配色"},
+      {"Test notification", "测试通知"},
+      {"This is a low battery notification preview.", "这是一条低电量通知预览。"},
+      {"Battery monitoring for your devices", "监控设备电量"},
+      {"Overview", "概览"},
+      {"Test battery notification", "测试电量通知"},
+      {"Looking for 2.4 GHz receivers...", "正在查找 2.4 GHz 接收器…"},
+      {"DELUX M800 Mini: searching...", "DELUX M800 Mini：正在查找…"},
+      {"JBL Quantum 650: searching...", "JBL Quantum 650：正在查找…"},
+      {"Volti is connecting to receivers...", "Volti 正在连接接收器…"},
+      {"Open Volti", "打开 Volti"},
+      {"Exit", "退出"},
+      {"DELUX mouse: searching...", "DELUX 鼠标：正在查找…"},
+      {"JBL headset: searching...", "JBL 耳机：正在查找…"},
+      {"Settings", "设置"},
+      {"Start with Windows", "随 Windows 启动"},
+      {"Listed in Windows Startup apps.", "可在 Windows 的启动应用列表中找到。"},
+      {"Themes", "主题"},
+      {"Low (%)", "低电量 (%)"},
+      {"Critical (%)", "极低电量 (%)"},
+      {"Critical battery — ", "电量极低 — "},
+      {"Low battery — ", "电量低 — "},
+      {"Battery at ", "当前电量为 "},
+      {". Connect your device to charge.", "。请连接设备充电。"},
+      {"Volti startup", "Volti 启动设置"},
+      {"HID discovery", "HID 设备检测"},
+      {"Reading...", "正在读取…"},
+      {"DELUX battery", "DELUX 电量"},
+      {"JBL battery", "JBL 电量"},
+      {"DELUX/JBL receivers not found.", "未找到 DELUX/JBL 接收器。"},
+      {"2.4 GHz readers active.", "2.4 GHz 接收器已连接。"},
+      {"One receiver was not found.", "有一个接收器未找到。"},
+      {"Access denied", "访问被拒绝"},
+      {"Disconnected", "已断开"},
+      {"No response", "无响应"},
+      {"Readers", "读取器"},
+    };
     internal static void Load(){try{using(var key=Registry.CurrentUser.OpenSubKey("Software\\Volti")){if(key!=null)Language=(string)key.GetValue("Language","en");}}catch{} }
     internal static void SetLanguage(string language){using(var key=Registry.CurrentUser.CreateSubKey("Software\\Volti"))key.SetValue("Language",language);Language=language;}
-    internal static string T(string english){string value;return Language=="pt-BR"&&Portuguese.TryGetValue(english,out value)?value:english;}
-    internal static string Convert(string text){string[] parts=text.Split(new[]{"   •   "},StringSplitOptions.None);if(parts.Length==2)return Convert(parts[0])+"   •   "+Convert(parts[1]);foreach(var entry in Portuguese){if(text==entry.Value||text==entry.Key)return T(entry.Key);}return text;}
-    internal static void Apply(Control control){control.Text=Convert(control.Text);foreach(Control child in control.Controls)Apply(child);}
+    internal static string T(string english){string value;var language=Language=="pt-BR"?Portuguese:Language=="zh-CN"?Chinese:null;return language!=null&&language.TryGetValue(english,out value)?value:english;}
+    internal static string Convert(string text){string[] parts=text.Split(new[]{"   •   "},StringSplitOptions.None);if(parts.Length==2)return Convert(parts[0])+"   •   "+Convert(parts[1]);foreach(var language in new[]{Portuguese,Chinese})foreach(var entry in language){if(text==entry.Value||text==entry.Key)return T(entry.Key);}return text;}
+    internal static void Apply(Control control){control.Text=Convert(control.Text);if(control.AccessibleName!=null)control.AccessibleName=Convert(control.AccessibleName);foreach(Control child in control.Controls)Apply(child);}
   }
 }

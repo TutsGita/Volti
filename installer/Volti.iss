@@ -1,5 +1,5 @@
-; SPDX-License-Identifier: AGPL-3.0-only
-#define AppVersion "0.1.0-preview.1"
+﻿; SPDX-License-Identifier: AGPL-3.0-only
+#define AppVersion "0.2.0"
 [Setup]
 AppId={{C09F5E69-BD13-420C-AAB7-79630B2658CF}
 AppName=Volti

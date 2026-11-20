@@ -11,8 +11,8 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Volti")]
 [assembly: System.Reflection.AssemblyProduct("Volti")]
-[assembly: System.Reflection.AssemblyVersion("0.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("0.1.0-preview.1")]
+[assembly: System.Reflection.AssemblyVersion("0.2.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("0.2.0")]
 namespace Volti {
   sealed class BatteryMenuColors : ProfessionalColorTable {
     static Color Surface {get{return MainForm.Surface;}} static Color Hover {get{return MainForm.Card;}} static Color Muted {get{return MainForm.Accent;}}
@@ -55,10 +55,13 @@ namespace Volti {
     }
   }
   sealed class FrostCard : Panel {
-    public FrostCard(){DoubleBuffered=true;ResizeRedraw=true;}
+    public FrostCard(){SetStyle(ControlStyles.SupportsTransparentBackColor,true);DoubleBuffered=true;ResizeRedraw=true;}
     protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-      using(var brush=new System.Drawing.Drawing2D.LinearGradientBrush(ClientRectangle,MainForm.Mix(MainForm.Card,MainForm.Ink,0.07f),MainForm.Card,90f))e.Graphics.FillRoundedRectangle(brush,1,1,Width-3,Height-3,20);
-      using(var pen=new Pen(MainForm.Mix(MainForm.Card,MainForm.Ink,0.20f)))e.Graphics.DrawRoundedRectangle(pen,1,1,Width-3,Height-3,20);
+      var bounds=new Rectangle(1,1,Width-3,Height-3);
+      using(var brush=new System.Drawing.Drawing2D.LinearGradientBrush(bounds,MainForm.Mix(MainForm.Card,MainForm.Ink,0.24f),MainForm.Mix(MainForm.Card,MainForm.Surface,0.32f),65f))
+        e.Graphics.FillRoundedRectangle(brush,bounds.X,bounds.Y,bounds.Width,bounds.Height,32);
+      using(var pen=new Pen(MainForm.Mix(MainForm.Card,MainForm.Ink,0.42f)))
+        e.Graphics.DrawRoundedRectangle(pen,bounds.X,bounds.Y,bounds.Width,bounds.Height,32);
     }
   }
   static class GraphicsExtensions {
@@ -134,109 +137,197 @@ namespace Volti {
     }
   }
 
-  sealed class MainForm : Form {
-    readonly Label deluxValue, jblValue, footer;
-    readonly Panel deluxFill, jblFill;
-    readonly Panel overviewPanel, settingsPanel;
+  sealed partial class MainForm : ApplicationContext {
+    Label deluxValue, jblValue, footer;
+    Panel deluxFill, jblFill;
+    Panel overviewPanel, settingsPanel;
     readonly NotifyIcon trayMouse, trayHeadset;
     readonly ToolStripMenuItem trayDelux, trayJbl, trayStatus;
     CheckBox startupCheck;
-    readonly Button overviewTab, settingsTab;
+
     readonly Icon appIcon;
     Icon trayMouseIcon, trayHeadsetIcon;
 
-    bool exitRequested;
+
     bool updatingStartup;
     readonly List<IntPtr> handles=new List<IntPtr>();
     readonly List<Thread> readers=new List<Thread>();
-    readonly object labelLock=new object();
-    readonly Dictionary<Label,string> shownValues=new Dictionary<Label,string>();
-    volatile bool stopping;
-    public MainForm() {
-      appIcon=VoltiBrand.CreateIcon();
 
-      L.Load();Text="Volti"; Icon=appIcon; FormBorderStyle=FormBorderStyle.None; Width=450; Height=560; MinimumSize=new Size(450,560); MaximumSize=new Size(450,560); StartPosition=FormStartPosition.CenterScreen;
-      BackColor=Color.FromArgb(20,12,15); ForeColor=Color.White; Font=new Font("Segoe UI",10);
-      var accent=new Panel{Left=0,Top=36,Width=450,Height=3,Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right,BackColor=VoltiBrand.Red}; Controls.Add(accent);
-      var logo=new PictureBox{Left=23,Top=54,Width=42,Height=42,SizeMode=PictureBoxSizeMode.Zoom,Image=Image.FromFile(System.IO.Path.Combine(Application.StartupPath,"assets","volti-icon.png"))}; Controls.Add(logo);
-      Controls.Add(new Label{Text="Volti",Left=74,Top=55,Width=330,Height=25,ForeColor=Color.FromArgb(255,242,242),Font=new Font("Segoe UI Semibold",12,FontStyle.Bold)});
-      Controls.Add(new Label{Text=L.T("Battery monitoring for your devices"),Left=75,Top=80,Width=330,Height=20,ForeColor=Color.FromArgb(190,164,166),Font=new Font("Segoe UI",9)});
-      overviewTab=new Button{Text=L.T("Overview"),Left=24,Top=108,Width=126,Height=31,FlatStyle=FlatStyle.Flat,BackColor=VoltiBrand.Wine,ForeColor=Color.White,Font=new Font("Segoe UI",9,FontStyle.Bold),Cursor=Cursors.Hand};
-      settingsTab=new Button{Text="⚙",Tag="settings-gear",AccessibleName="Settings",Left=24,Top=510,Width=40,Height=34,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(38,22,26),ForeColor=Color.FromArgb(217,180,182),Font=new Font("Segoe UI",9),Cursor=Cursors.Hand};
+
+    volatile bool stopping;
+    readonly Control dispatcher=new Control();
+    Form window;
+    readonly Font bodyFont=new Font("Segoe UI",10);
+    readonly ToolStripMenuItem openItem, exitItem;
+    readonly ContextMenuStrip menu;
+    readonly string[] readings={"—","—"};
+    readonly string[] queuedReadings=new string[2];
+    readonly object readingLock=new object();
+    string receiverStatus="Looking for 2.4 GHz receivers...";
+    readonly List<IDisposable> panelResources=new List<IDisposable>();
+    Font batteryFont, statusFont;
+    readonly bool panelProcess;
+    readonly PanelLink link=new PanelLink();
+    readonly System.Windows.Forms.Timer bridgeTimer=new System.Windows.Forms.Timer{Interval=250};
+
+    public MainForm(bool panelProcess) {
+      this.panelProcess=panelProcess;
+      L.Load();LoadTheme();
+      LoadLimits();
+      appIcon=VoltiBrand.CreateIcon();
+      var handle=dispatcher.Handle;
+      bridgeTimer.Tick+=(s,e)=>SyncProcesses();
+      bridgeTimer.Start();
+      if(panelProcess){ShowPanel();return;}
+      menu=new ContextMenuStrip{Renderer=new BatteryMenuRenderer(),ShowImageMargin=false,ShowCheckMargin=false};
+      trayDelux=new ToolStripMenuItem{Enabled=false};
+      trayJbl=new ToolStripMenuItem{Enabled=false};
+      trayStatus=new ToolStripMenuItem{Enabled=false};
+      openItem=new ToolStripMenuItem(L.T("Open Volti"));openItem.Click+=(s,e)=>LaunchPanel();
+      exitItem=new ToolStripMenuItem(L.T("Exit"));exitItem.Click+=(s,e)=>ExitThread();
+      menu.Items.AddRange(new ToolStripItem[]{trayDelux,trayJbl,trayStatus,new ToolStripSeparator(),openItem,exitItem});
+      trayMouse=new NotifyIcon{ContextMenuStrip=menu};
+      trayHeadset=new NotifyIcon{ContextMenuStrip=menu};
+      trayMouse.DoubleClick+=(s,e)=>LaunchPanel();trayHeadset.DoubleClick+=(s,e)=>LaunchPanel();
+      ApplyTheme();RefreshVisibility();Publish();DetectBluetooth();
+      new Thread(Connect){IsBackground=true,Name="HID discovery"}.Start();
+    }
+    void BuildWindow() {
+      window=new Form{Text="Volti",Icon=appIcon,FormBorderStyle=FormBorderStyle.None,ClientSize=new Size(450,560),StartPosition=FormStartPosition.CenterScreen,Font=bodyFont};
+      window.FormClosed+=(s,e)=>dispatcher.BeginInvoke((Action)ExitThread);
+      window.Disposed+=(s,e)=>{foreach(var resource in panelResources)resource.Dispose();panelResources.Clear();overviewPanel=settingsPanel=themesPanel=deluxFill=jblFill=null;deluxValue=jblValue=footer=null;batteryFont=statusFont=null;startupCheck=null;window=null;};
+      batteryFont=PanelFont("Segoe UI",17,FontStyle.Bold);
+      statusFont=PanelFont("Segoe UI",10,FontStyle.Bold);
+
+      var accent=new Panel{Left=0,Top=36,Width=450,Height=3,Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right,BackColor=VoltiBrand.Red}; window.Controls.Add(accent);
+      var logo=new PictureBox{Left=23,Top=54,Width=42,Height=42,SizeMode=PictureBoxSizeMode.Zoom,Image=LoadPanelLogo()}; window.Controls.Add(logo);
+      window.Controls.Add(new Label{Text="Volti",Left=74,Top=55,Width=330,Height=25,ForeColor=Color.FromArgb(255,242,242),Font=PanelFont("Segoe UI Semibold",12,FontStyle.Bold)});
+      window.Controls.Add(new Label{Text=L.T("Battery monitoring for your devices"),Left=75,Top=80,Width=330,Height=20,ForeColor=Color.FromArgb(190,164,166),Font=PanelFont("Segoe UI",9)});
+      var overviewTab=new Button{Text=L.T("Overview"),Left=24,Top=108,Width=126,Height=31,FlatStyle=FlatStyle.Flat,BackColor=VoltiBrand.Wine,ForeColor=Color.White,Font=PanelFont("Segoe UI",9,FontStyle.Bold),Cursor=Cursors.Hand};
+      var settingsTab=new GearButton{Tag="settings-gear",AccessibleName=L.T("Settings"),Left=24,Top=504,Width=48,Height=44,FlatStyle=FlatStyle.Flat,Cursor=Cursors.Hand};
       overviewTab.FlatAppearance.BorderColor=Color.FromArgb(138,48,57);settingsTab.FlatAppearance.BorderColor=Color.FromArgb(79,40,46);
-      overviewTab.Click+=(s,e)=>ShowSettings(false);settingsTab.Click+=(s,e)=>ShowSettings(true);Controls.Add(overviewTab);Controls.Add(settingsTab);
+      overviewTab.Click+=(s,e)=>ShowSettings(false);settingsTab.Click+=(s,e)=>ShowSettings(true);window.Controls.Add(overviewTab);window.Controls.Add(settingsTab);
       overviewPanel=new Panel{Left=0,Top=148,Width=450,Height=350,BackColor=Color.Transparent};
       settingsPanel=new Panel{Left=0,Top=148,Width=450,Height=350,BackColor=Color.FromArgb(27,16,20),Visible=false};
-      Controls.Add(overviewPanel);Controls.Add(settingsPanel);
+      window.Controls.Add(overviewPanel);window.Controls.Add(settingsPanel);
       deluxValue=AddRow(overviewPanel,"DELUX M800 Mini",8,out deluxFill); jblValue=AddRow(overviewPanel,"JBL Quantum 650",158,out jblFill);
-      var simulateButton=new Button{Text=L.T("Test battery notification"),Left=24,Top=173,Width=240,Height=34,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(61,27,32),ForeColor=Color.FromArgb(255,235,235),Font=new Font("Segoe UI",9,FontStyle.Bold),Cursor=Cursors.Hand};
+      overviewPanel.AutoScroll=true;
+      AddVisibility(deluxValue.Parent,"mouse");AddVisibility(jblValue.Parent,"headset");
+      var detect=new Button{Text=L.T("Detect devices"),Left=240,Top=108,Width=185,Height=31};
+      detect.Click+=(s,e)=>{link.Detect.Set();detect.Text=L.T("Detection requested");};
+      window.Controls.Add(detect);
+      var github=new LinkLabel{Text="tutsgita",Left=325,Top=522,Width=100,Height=18,Font=PanelFont("Segoe UI",8),TextAlign=ContentAlignment.MiddleRight};
+      github.LinkClicked+=(s,e)=>Process.Start(new ProcessStartInfo("https://github.com/TutsGita"){UseShellExecute=true});
+      window.Controls.Add(github);
+      var simulateButton=new Button{Text=L.T("Test battery notification"),Left=24,Top=173,Width=240,Height=34,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(61,27,32),ForeColor=Color.FromArgb(255,235,235),Font=PanelFont("Segoe UI",9,FontStyle.Bold),Cursor=Cursors.Hand};
       simulateButton.FlatAppearance.BorderColor=Color.FromArgb(147,53,62);simulateButton.FlatAppearance.MouseOverBackColor=Color.FromArgb(84,34,41);simulateButton.Click+=(s,e)=>ShowLowBatteryNotice("10%");simulateButton.Top=155;settingsPanel.Controls.Add(simulateButton);
-      footer=new Label{Text=L.T("Looking for 2.4 GHz receivers..."),Left=25,Top=308,Width=395,Height=34,ForeColor=Color.FromArgb(199,168,170),Font=new Font("Segoe UI",9)}; overviewPanel.Controls.Add(footer);
-      BuildSettingsPanel(); BuildThemes(); AddLanguageSelector(); ApplyTheme();
-      var menu=new ContextMenuStrip{Renderer=new BatteryMenuRenderer(),BackColor=Color.FromArgb(32,34,37),ForeColor=Color.FromArgb(242,243,245),Font=new Font("Segoe UI",9),ShowImageMargin=false,ShowCheckMargin=false,Padding=new Padding(0,5,0,5),AutoSize=true};
-      trayDelux=new ToolStripMenuItem(L.T("DELUX M800 Mini: searching...")){Enabled=false};
-      trayJbl=new ToolStripMenuItem(L.T("JBL Quantum 650: searching...")){Enabled=false};
-      trayStatus=new ToolStripMenuItem(L.T("Volti is connecting to receivers...")){Enabled=false};
-      menu.Items.Add(trayDelux); menu.Items.Add(trayJbl); menu.Items.Add(new ToolStripSeparator());
-      var openItem=new ToolStripMenuItem(L.T("Open Volti")); openItem.Click+=(s,e)=>ShowPanel(); menu.Items.Add(openItem);
-      var exitItem=new ToolStripMenuItem(L.T("Exit")); exitItem.Click+=(s,e)=>{exitRequested=true;Close();}; menu.Items.Add(exitItem);
-      trayMouseIcon=CreateTrayBatteryIcon(deluxValue.Text,false);trayHeadsetIcon=CreateTrayBatteryIcon(jblValue.Text,true);
-      trayMouse=new NotifyIcon{Icon=trayMouseIcon,Text=L.T("DELUX mouse: searching..."),ContextMenuStrip=menu,Visible=true};
-      trayHeadset=new NotifyIcon{Icon=trayHeadsetIcon,Text=L.T("JBL headset: searching..."),ContextMenuStrip=menu,Visible=true};
-      trayMouse.DoubleClick+=(s,e)=>ShowPanel();trayHeadset.DoubleClick+=(s,e)=>ShowPanel();
-      AddCustomTitleBar(); ApplyTheme();
-      Shown+=(s,e)=>{BeginInvoke((Action)(()=>{Hide();ShowInTaskbar=false;}));new Thread(Connect){IsBackground=true,Name=L.T("HID discovery")}.Start();};
-      FormClosing+=(s,e)=>{
-        if(!exitRequested){e.Cancel=true;Hide();ShowInTaskbar=false;return;}
-        stopping=true;trayMouse.Visible=false;trayHeadset.Visible=false;trayMouse.Dispose();trayHeadset.Dispose();if(trayMouseIcon!=null)trayMouseIcon.Dispose();if(trayHeadsetIcon!=null)trayHeadsetIcon.Dispose();if(!Object.ReferenceEquals(appIcon,SystemIcons.Application))appIcon.Dispose();
-        Thread[] pending;
-        lock(handles){foreach(IntPtr h in handles)Win32.CancelIoEx(h,IntPtr.Zero);pending=readers.ToArray();}
-        bool completed=true;foreach(Thread reader in pending)if(!reader.Join(2000))completed=false;
-        // If a driver stalls cancellation, process termination owns the remaining handles.
-        if(completed)lock(handles){foreach(IntPtr h in handles)Win32.CloseHandle(h);handles.Clear();}
-      };
+      footer=new Label{Text=L.T("Looking for 2.4 GHz receivers..."),Left=25,Top=372,Width=395,Height=34,ForeColor=Color.FromArgb(199,168,170),Font=PanelFont("Segoe UI",9)}; overviewPanel.Controls.Add(footer);
+      BuildSettingsPanel();BuildThemes();AddLanguageSelector();AddCustomTitleBar();
+      deluxValue.Text=L.T(readings[0]);jblValue.Text=L.T(readings[1]);footer.Text=L.T(receiverStatus);
+      ApplyTheme();
     }
+    void ReleaseWindow(){if(window!=null)window.Dispose();}
+    protected override void ExitThreadCore(){
+      stopping=true;
+      if(applicationTray!=null)applicationTray.Dispose();
+      foreach(var icon in bluetoothIcons.Values)icon.Dispose();
+      bridgeTimer.Dispose();link.Dispose();
+      ReleaseWindow();
+      if(trayMouse!=null){trayMouse.Dispose();trayHeadset.Dispose();menu.Dispose();}
+      if(trayMouseIcon!=null)trayMouseIcon.Dispose();
+      if(trayHeadsetIcon!=null)trayHeadsetIcon.Dispose();
+      appIcon.Dispose();bodyFont.Dispose();
+      Thread[] pending;
+      lock(handles){foreach(IntPtr h in handles)Win32.CancelIoEx(h,IntPtr.Zero);pending=readers.ToArray();}
+      bool completed=true;foreach(Thread reader in pending)if(!reader.Join(2000))completed=false;
+      if(completed)lock(handles){foreach(IntPtr h in handles)Win32.CloseHandle(h);handles.Clear();}
+      dispatcher.Dispose();base.ExitThreadCore();
+    }
+    Font PanelFont(string family,float size,FontStyle style=FontStyle.Regular){var font=new Font(family,size,style);panelResources.Add(font);return font;}
+    Image LoadPanelLogo(){var image=Image.FromFile(System.IO.Path.Combine(Application.StartupPath,"assets","volti-icon.png"));panelResources.Add(image);return image;}
     void AddCustomTitleBar(){
       var bar=new Panel{Left=0,Top=0,Width=450,Height=36,Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right,BackColor=Color.FromArgb(5,5,7)};
-      var mark=new PictureBox{Left=10,Top=9,Width=18,Height=18,SizeMode=PictureBoxSizeMode.Zoom,Image=Image.FromFile(System.IO.Path.Combine(Application.StartupPath,"assets","volti-icon.png"))};
-      var title=new Label{Text="Volti",Left=34,Top=0,Width=280,Height=36,ForeColor=Color.FromArgb(255,240,241),Font=new Font("Segoe UI",9),TextAlign=ContentAlignment.MiddleLeft};
+      var mark=new PictureBox{Left=10,Top=9,Width=18,Height=18,SizeMode=PictureBoxSizeMode.Zoom,Image=LoadPanelLogo()};
+      var title=new Label{Text="Volti",Left=34,Top=0,Width=280,Height=36,ForeColor=Color.FromArgb(255,240,241),Font=PanelFont("Segoe UI",9),TextAlign=ContentAlignment.MiddleLeft};
       bar.Controls.Add(mark);bar.Controls.Add(title);
-      Label minimize=new Label{Text="−",Left=358,Top=0,Width=46,Height=36,ForeColor=Color.FromArgb(220,220,224),Font=new Font("Segoe UI",13),TextAlign=ContentAlignment.MiddleCenter,Cursor=Cursors.Hand};
-      Label close=new Label{Text="×",Left=404,Top=0,Width=46,Height=36,ForeColor=Color.FromArgb(220,220,224),Font=new Font("Segoe UI",15),TextAlign=ContentAlignment.MiddleCenter,Cursor=Cursors.Hand};
-      minimize.MouseEnter+=(s,e)=>minimize.BackColor=Card;minimize.MouseLeave+=(s,e)=>minimize.BackColor=Surface;minimize.Click+=(s,e)=>{Hide();ShowInTaskbar=false;};
-      close.MouseEnter+=(s,e)=>close.BackColor=Card;close.MouseLeave+=(s,e)=>close.BackColor=Surface;close.Click+=(s,e)=>Close();
+      Label minimize=new Label{Text="−",Left=358,Top=0,Width=46,Height=36,ForeColor=Color.FromArgb(220,220,224),Font=PanelFont("Segoe UI",13),TextAlign=ContentAlignment.MiddleCenter,Cursor=Cursors.Hand};
+      Label close=new Label{Text="×",Left=404,Top=0,Width=46,Height=36,ForeColor=Color.FromArgb(220,220,224),Font=PanelFont("Segoe UI",15),TextAlign=ContentAlignment.MiddleCenter,Cursor=Cursors.Hand};
+      minimize.MouseEnter+=(s,e)=>minimize.BackColor=Card;minimize.MouseLeave+=(s,e)=>minimize.BackColor=Surface;minimize.Click+=(s,e)=>window.WindowState=FormWindowState.Minimized;
+      close.MouseEnter+=(s,e)=>close.BackColor=Card;close.MouseLeave+=(s,e)=>close.BackColor=Surface;close.Click+=(s,e)=>window.Close();
       bar.Controls.Add(minimize);bar.Controls.Add(close);bar.Paint+=(s,e)=>{using(var p=new Pen(Card)){e.Graphics.DrawLine(p,0,35,450,35);e.Graphics.DrawLine(p,357,7,357,29);e.Graphics.DrawLine(p,403,7,403,29);}};
-      MouseEventHandler drag=(s,e)=>{if(e.Button==MouseButtons.Left){Win32.ReleaseCapture();Win32.SendMessage(Handle,0x00A1,new IntPtr(2),IntPtr.Zero);}};
+      MouseEventHandler drag=(s,e)=>{if(e.Button==MouseButtons.Left){Win32.ReleaseCapture();Win32.SendMessage(window.Handle,0x00A1,new IntPtr(2),IntPtr.Zero);}};
       bar.MouseDown+=drag;mark.MouseDown+=drag;title.MouseDown+=drag;
-      Controls.Add(bar);bar.BringToFront();
+      window.Controls.Add(bar);bar.BringToFront();
     }
-    void ShowPanel(){ShowInTaskbar=true;Show();WindowState=FormWindowState.Normal;Activate();}
+    void ShowPanel(){if(window==null)BuildWindow();window.Show();if(window.WindowState==FormWindowState.Minimized)window.WindowState=FormWindowState.Normal;window.Activate();}
+    void LaunchPanel(){
+      try{
+        var path=System.IO.Path.Combine(Application.StartupPath,"Volti.UI.exe");
+        using(var process=Process.Start(new ProcessStartInfo(path){UseShellExecute=false})){}
+      }catch(Exception ex){trayHeadset.ShowBalloonTip(5000,"Volti",ex.Message,ToolTipIcon.Warning);}
+    }
+    void Publish(){link.Publish(readings[0],readings[1],receiverStatus,bluetoothSnapshot);}
+    void LoadLimits(){
+      for(int i=0;i<2;i++){
+        lowLimits[i]=Math.Max(2,LoadLimit(i,"Low",20));
+        criticalLimits[i]=Math.Min(lowLimits[i]-1,LoadLimit(i,"Critical",5));
+      }
+    }
+    void SyncProcesses(){
+      if(panelProcess){
+        var bt=link.Read();if(bt!=null&&bt.Length>3&&bluetoothSnapshot!=bt[3]){bluetoothSnapshot=bt[3];RenderBluetooth();}
+        if(link.Activate.WaitOne(0))ShowPanel();
+        string[] snapshot=link.Read();
+        if(snapshot==null||snapshot[2].Length==0||window==null)return;
+        if(readings[0]==snapshot[0]&&readings[1]==snapshot[1]&&receiverStatus==snapshot[2])return;
+        readings[0]=snapshot[0];readings[1]=snapshot[1];receiverStatus=snapshot[2];
+        RefreshPanel();
+      }else{
+        if(link.Detect.WaitOne(0)||DateTime.UtcNow>=nextBluetoothScan)DetectBluetooth();
+        if(link.Preferences.WaitOne(0)){
+          string oldTheme=ThemeName,oldLanguage=L.Language;
+          LoadTheme();L.Load();LoadLimits();
+          RefreshVisibility();
+          openItem.Text=L.T("Open Volti");exitItem.Text=L.T("Exit");
+          if(oldTheme!=ThemeName||oldLanguage!=L.Language)ApplyTheme();
+          CheckAlert(false,readings[0]);CheckAlert(true,readings[1]);
+        }
+        if(link.Preview.WaitOne(0))ShowLowBatteryNotice("");
+      }
+    }
+    void RefreshPanel(){deluxValue.Text=L.T(readings[0]);jblValue.Text=L.T(readings[1]);footer.Text=L.T(receiverStatus);UpdateBatteryVisuals();}
     void BuildSettingsPanel(){
-      settingsPanel.Controls.Add(new Label{Text=L.T("Settings"),Left=24,Top=15,Width=390,Height=30,Font=new Font("Segoe UI",14,FontStyle.Bold)});
+      settingsPanel.Controls.Add(new Label{Text=L.T("Settings"),Left=24,Top=15,Width=390,Height=30,Font=PanelFont("Segoe UI",14,FontStyle.Bold)});
       startupCheck=new CheckBox{Text=L.T("Start with Windows"),Left=25,Top=70,Width=390,Height=28,Checked=StartupTaskExists()};
       startupCheck.CheckedChanged+=(s,e)=>{if(!updatingStartup)SetStartupTask(startupCheck.Checked);};settingsPanel.Controls.Add(startupCheck);
-      settingsPanel.Controls.Add(new Label{Text=L.T("Listed in Windows Startup apps."),Left=25,Top=106,Width=395,Height=40,Font=new Font("Segoe UI",9)});
+      settingsPanel.Controls.Add(new Label{Text=L.T("Listed in Windows Startup apps."),Left=25,Top=106,Width=395,Height=40,Font=PanelFont("Segoe UI",9)});
     }
     void AddLanguageSelector(){
       var language=new Button{Text=L.T("Language"),Left=160,Top=215,Width=120,Height=28};settingsPanel.Controls.Add(language);
-      var languages=new ContextMenuStrip();
-      foreach(string code in new[]{"en","pt-BR"}){string selected=code;var item=new ToolStripMenuItem(code=="en"?"English":"Português (Brasil)");item.Click+=(s,e)=>{L.SetLanguage(selected);L.Apply(this);language.Text=L.T("Language");foreach(ToolStripItem entry in trayMouse.ContextMenuStrip.Items)entry.Text=L.Convert(entry.Text);UpdateTray();Invalidate(true);};languages.Items.Add(item);}
-      language.Click+=(s,e)=>languages.Show(language,new Point(0,language.Height));
+      var languages=new ContextMenuStrip();panelResources.Add(languages);
+      foreach(var entry in new[]{new[]{"en","English"},new[]{"pt-BR","Português (Brasil)"},new[]{"zh-CN","简体中文"}}){
+        string selected=entry[0];var item=new ToolStripMenuItem(entry[1]);
+        item.Click+=(s,e)=>{L.SetLanguage(selected);L.Apply(window);RefreshPanel();link.Preferences.Set();window.Invalidate(true);};
+        languages.Items.Add(item);
+      }
+      language.Click+=(s,e)=>{languages.Renderer=new BatteryMenuRenderer();languages.BackColor=Surface;foreach(ToolStripItem item in languages.Items)item.ForeColor=Ink;languages.Show(language,new Point(0,language.Height));};
     }
     void ShowSettings(bool show){themesPanel.Visible=false;overviewPanel.Visible=!show;settingsPanel.Visible=show;ApplyTheme();}
     static string ThemeName="Black";
     Panel themesPanel;
     internal static Color Surface, Ink, Card, Accent;
-    void BuildThemes(){
+    void LoadTheme(){
       try{using(var k=Registry.CurrentUser.OpenSubKey(SettingsKey)){if(k!=null)ThemeName=(string)k.GetValue("Theme","Black");}}catch{}
-      themesPanel=new Panel{Left=0,Top=148,Width=450,Height=350,Visible=false};Controls.Add(themesPanel);
+    }
+    void BuildThemes(){
+      themesPanel=new Panel{Left=0,Top=148,Width=450,Height=350,Visible=false};window.Controls.Add(themesPanel);
       var themes=new Button{Text=L.T("Themes"),Left=25,Top=215,Width=110,Height=28};settingsPanel.Controls.Add(themes);
       themes.Click+=(s,e)=>{settingsPanel.Visible=false;overviewPanel.Visible=false;themesPanel.Visible=true;};
       string[] names={"Black","White","Gruvbox","Nord"};
       string[][] palettes={new[]{"#202020","#323232","#0078d4","#ffffff"},new[]{"#f3f3f3","#ffffff","#0078d4","#202020"},new[]{"#282828","#3c3836","#d79921","#ebdbb2"},new[]{"#2e3440","#3b4252","#88c0d0","#eceff4"}};
       for(int i=0;i<4;i++){string name=names[i];string[] colors=palettes[i];var tile=new Button{Text=L.T(name)+"   •   "+L.T("Palette"),Left=24+(i%2)*204,Top=15+(i/2)*145,Width=194,Height=125,TextAlign=ContentAlignment.BottomCenter,FlatStyle=FlatStyle.Flat};
         tile.Paint+=(s,e)=>{for(int j=0;j<4;j++)using(var b=new SolidBrush(ColorTranslator.FromHtml(colors[j])))e.Graphics.FillRectangle(b,10+j*43,12,43,52);if(ThemeName==name)using(var p=new Pen(Accent,3))e.Graphics.DrawRectangle(p,2,2,tile.Width-5,tile.Height-5);};
-        tile.Click+=(s,e)=>{ThemeName=name;using(var k=Registry.CurrentUser.CreateSubKey(SettingsKey))k.SetValue("Theme",name);ApplyTheme();};themesPanel.Controls.Add(tile);
+        tile.Click+=(s,e)=>{ThemeName=name;using(var k=Registry.CurrentUser.CreateSubKey(SettingsKey))k.SetValue("Theme",name);ApplyTheme();link.Preferences.Set();};themesPanel.Controls.Add(tile);
       }
     }
     void ApplyTheme(){
@@ -245,26 +336,30 @@ namespace Volti {
       if(ThemeName=="Nord"){bg="#2e3440";fg="#eceff4";card="#3b4252";accent="#88c0d0";}
       Surface=ColorTranslator.FromHtml(bg);Ink=ColorTranslator.FromHtml(fg);Card=ColorTranslator.FromHtml(card);Accent=ColorTranslator.FromHtml(accent);
       if(ThemeName=="Black"||light)try{using(var k=Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\DWM")){if(k!=null){int n=unchecked((int)Convert.ToUInt32(k.GetValue("AccentColor",0xffd47800)));Accent=Color.FromArgb(n&255,(n>>8)&255,(n>>16)&255);}}}catch{}
-      PaintTheme(this);UpdateBatteryVisuals();if(trayMouse!=null){trayMouse.ContextMenuStrip.BackColor=Surface;trayMouse.ContextMenuStrip.ForeColor=Ink;UpdateTray();}Invalidate(true);
+      if(window!=null){PaintTheme(window);UpdateBatteryVisuals();window.Invalidate(true);}
+      if(menu!=null){menu.BackColor=Surface;menu.ForeColor=Ink;UpdateTray();}
     }
     void PaintTheme(Control root){
-      root.BackColor=root is Label || root is ProductGlyph || root is PictureBox?Color.Transparent:root is Button || root is FrostCard?Card:root.Parent is FrostCard?Card:Surface;root.ForeColor=Ink;
+      root.BackColor=root is FrostCard || root is Label || root is ProductGlyph || root is PictureBox?Color.Transparent:root is Button || root is FrostCard?Card:root.Parent is FrostCard?Card:Surface;root.ForeColor=Ink;
       Button button=root as Button;if(button!=null){button.UseVisualStyleBackColor=false;button.FlatStyle=FlatStyle.Flat;button.FlatAppearance.BorderColor=Accent;if((string)button.Tag=="settings-gear"){button.FlatAppearance.BorderSize=0;button.BackColor=Surface;}button.FlatAppearance.MouseOverBackColor=Mix(Card,Accent,0.18f);button.FlatAppearance.MouseDownBackColor=Mix(Card,Accent,0.30f);}
       foreach(Control child in root.Controls)PaintTheme(child);
+      var picker=root as ThresholdPicker;if(picker!=null)picker.ApplyPalette();
     }
     internal static Color Mix(Color a,Color b,float t){return Color.FromArgb((int)(a.R+(b.R-a.R)*t),(int)(a.G+(b.G-a.G)*t),(int)(a.B+(b.B-a.B)*t));}
 
     const string SettingsKey="Software\\Volti";
     readonly int[] lowLimits=new int[2],criticalLimits=new int[2],alertStates=new int[2];
-    void AddAlerts(Panel card,bool headset,Label value){
-      int i=headset?1:0;int low=LoadLimit(i,"Low",20),critical=LoadLimit(i,"Critical",5);low=Math.Max(2,low);critical=Math.Min(critical,low-1);lowLimits[i]=low;criticalLimits[i]=critical;
-      card.Controls.Add(new Label{Text=L.T("Low (%)"),Left=16,Top=70,Width=100,Height=22});
-      card.Controls.Add(new Label{Text=L.T("Critical (%)"),Left=200,Top=70,Width=140,Height=22});
-      var l=new NumericUpDown{Left=16,Top=98,Width=150,Minimum=2,Maximum=100,Value=low};
-      var c=new NumericUpDown{Left=200,Top=98,Width=150,Minimum=1,Maximum=low-1,Value=critical};
-      card.Controls.Add(l);card.Controls.Add(c);
-      l.ValueChanged+=(s,e)=>{c.Maximum=l.Value-1;lowLimits[i]=(int)l.Value;SaveLimit(i,"Low",lowLimits[i]);CheckAlert(headset,value.Text);};
-      c.ValueChanged+=(s,e)=>{criticalLimits[i]=(int)c.Value;SaveLimit(i,"Critical",criticalLimits[i]);CheckAlert(headset,value.Text);};
+    void AddAlerts(Panel card,bool headset){
+      int i=headset?1:0;
+      var lowLabel=new Label{Text=L.T("Low (%)"),Left=16,Top=70,Width=140,Height=22};
+      var criticalLabel=new Label{Text=L.T("Critical (%)"),Left=200,Top=70,Width=150,Height=22};
+      var low=new ThresholdPicker(16,lowLabel.Text);
+      var critical=new ThresholdPicker(200,criticalLabel.Text);
+      Action refresh=()=>{low.SetRange(criticalLimits[i]+1,100,lowLimits[i]);critical.SetRange(1,lowLimits[i]-1,criticalLimits[i]);};
+      refresh();
+      low.Committed+=number=>{SaveLimit(i,"Low",number);lowLimits[i]=number;refresh();link.Preferences.Set();};
+      critical.Committed+=number=>{SaveLimit(i,"Critical",number);criticalLimits[i]=number;refresh();link.Preferences.Set();};
+      card.Controls.AddRange(new Control[]{lowLabel,criticalLabel,low,critical});
     }
     static int LoadLimit(int device,string level,int fallback){try{using(var k=Registry.CurrentUser.OpenSubKey(SettingsKey)){return Math.Max(1,Math.Min(100,Convert.ToInt32(k==null?fallback:k.GetValue(device+level,fallback))));}}catch{return fallback;}}
     static void SaveLimit(int device,string level,int value){using(var k=Registry.CurrentUser.CreateSubKey(SettingsKey))k.SetValue(device+level,value);}
@@ -275,42 +370,39 @@ namespace Volti {
       var card=new FrostCard{Left=20,Top=y,Width=410,Height=140,Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right,BackColor=Color.FromArgb(42,23,28)};
       parent.Controls.Add(card);
       card.Controls.Add(new ProductGlyph{Headset=name.StartsWith("JBL",StringComparison.Ordinal),Left=14,Top=12,Width=24,Height=26});
-      card.Controls.Add(new Label{Text=name,Left=48,Top=10,Width=220,Height=22,Font=new Font("Segoe UI",10,FontStyle.Bold),ForeColor=Color.FromArgb(226,222,236)});
-      var value=new Label{Text="—",Left=260,Top=5,Width=112,Height=32,Anchor=AnchorStyles.Top|AnchorStyles.Right,TextAlign=ContentAlignment.MiddleRight,Font=new Font("Segoe UI",17,FontStyle.Bold),ForeColor=VoltiBrand.RedSoft}; card.Controls.Add(value);
+      card.Controls.Add(new Label{Text=name,Left=48,Top=10,Width=220,Height=22,Font=PanelFont("Segoe UI",10,FontStyle.Bold),ForeColor=Color.FromArgb(226,222,236)});
+      var value=new Label{Text="—",Left=242,Top=5,Width=130,Height=32,Anchor=AnchorStyles.Top|AnchorStyles.Right,TextAlign=ContentAlignment.MiddleRight,Font=batteryFont,ForeColor=VoltiBrand.RedSoft}; card.Controls.Add(value);
       var track=new Panel{Left=16,Top=46,Width=356,Height=5,Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right,BackColor=Color.FromArgb(91,49,54)}; card.Controls.Add(track);
       fill=new Panel{Left=0,Top=0,Width=0,Height=5,BackColor=VoltiBrand.Red}; track.Controls.Add(fill);
-      AddAlerts(card,name.StartsWith("JBL",StringComparison.Ordinal),value);return value;
+      AddAlerts(card,name.StartsWith("JBL",StringComparison.Ordinal));return value;
     }
-    void Set(Label label,string value){
-      lock(labelLock){string prior;if(shownValues.TryGetValue(label,out prior)&&prior==value)return;shownValues[label]=value;}
-      if(IsHandleCreated&&!IsDisposed)try{BeginInvoke((Action)(()=>{if(!IsDisposed){label.Text=value;UpdateBatteryVisuals();UpdateTray();CheckAlert(label==jblValue,value);}}));}catch{}
+    void Set(bool headset,string value){
+      int i=headset?1:0;
+      lock(readingLock){if(queuedReadings[i]==value)return;queuedReadings[i]=value;}
+      Post(()=>{
+        readings[i]=value;
+        if(window!=null){(headset?jblValue:deluxValue).Text=L.T(value);UpdateBatteryVisuals();}
+        Publish();UpdateTray();CheckAlert(headset,value);
+      });
     }
-    void ShowLowBatteryNotice(string value){trayHeadset.ShowBalloonTip(6000,L.T("Test notification"),L.T("This is a low battery notification preview."),ToolTipIcon.Warning);}
+    void Post(Action update){
+      if(stopping)return;
+      try{dispatcher.BeginInvoke((Action)(()=>{if(!stopping)update();}));}catch(InvalidOperationException){}
+    }
+    void ShowLowBatteryNotice(string value){if(panelProcess){link.Preview.Set();return;}trayHeadset.ShowBalloonTip(6000,L.T("Test notification"),L.T("This is a low battery notification preview."),ToolTipIcon.Warning);}
     static bool TryPercent(string value,out int percent){percent=0;int i=value.IndexOf('%');return i>0&&int.TryParse(value.Substring(0,i).Trim(),out percent);}
-    void SetFill(Panel fill,Label value){int p;if(!TryPercent(value.Text,out p)){fill.Width=0;value.ForeColor=Ink;return;}Panel track=fill.Parent as Panel;if(track!=null){fill.Width=(track.ClientSize.Width*p)/100;}Color level=BatteryColor(p);fill.BackColor=level;value.ForeColor=level;}
+    void SetFill(Panel fill,Label value){int p;if(!TryPercent(value.Text,out p)){fill.Width=0;value.ForeColor=Ink;value.Font=statusFont;return;}value.Font=batteryFont;Panel track=fill.Parent as Panel;if(track!=null){fill.Width=(track.ClientSize.Width*p)/100;}Color level=BatteryColor(p);fill.BackColor=level;value.ForeColor=level;}
     void UpdateBatteryVisuals(){SetFill(deluxFill,deluxValue);SetFill(jblFill,jblValue);}
-    const string StartupTaskName="Pulso Duo - Monitor de Bateria";
-    const string LegacyStartupTaskName="Bateria Leve - Monitor JBL";
-    static ProcessStartInfo TaskInfo(string args){return new ProcessStartInfo{FileName="schtasks.exe",Arguments=args,UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden};}
-    static bool TaskExists(string name){try{using(Process p=Process.Start(TaskInfo("/Query /TN \""+name+"\""))){return p.WaitForExit(5000)&&p.ExitCode==0;}}catch{return false;}}
     const string RunKey="Software\\Microsoft\\Windows\\CurrentVersion\\Run";
     static bool StartupTaskExists(){try{using(var key=Registry.CurrentUser.OpenSubKey(RunKey)){return key!=null&&key.GetValue("Volti")!=null;}}catch(System.Security.SecurityException){return false;}}
-    static void DeleteTask(string name){using(Process p=Process.Start(TaskInfo("/Delete /TN \""+name+"\" /F"))){if(!p.WaitForExit(10000)||p.ExitCode!=0)throw new InvalidOperationException(L.T("Could not remove the old startup task. Run Volti once as administrator to finish migration."));}}
     void SetStartupTask(bool enable){
       try{
-        // Remove legacy launchers first to avoid starting two instances.
-        foreach(string name in new[]{StartupTaskName,LegacyStartupTaskName})if(TaskExists(name))DeleteTask(name);
-        using(var key=Registry.CurrentUser.CreateSubKey(RunKey)){if(enable)key.SetValue("Volti","\""+Application.ExecutablePath+"\"");else key.DeleteValue("Volti",false);}
-      }catch(Exception ex){updatingStartup=true;startupCheck.Checked=StartupTaskExists();updatingStartup=false;MessageBox.Show(this,ex.Message,L.T("Volti startup"),MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+        using(var key=Registry.CurrentUser.CreateSubKey(RunKey)){if(enable)key.SetValue("Volti","\""+System.IO.Path.Combine(Application.StartupPath,"Volti.exe")+"\"");else key.DeleteValue("Volti",false);}
+      }catch(Exception ex){updatingStartup=true;startupCheck.Checked=StartupTaskExists();updatingStartup=false;MessageBox.Show(window,ex.Message,L.T("Volti startup"),MessageBoxButtons.OK,MessageBoxIcon.Warning);}
     }
-    void Note(string value){
-#if DEBUG
-      Console.WriteLine("Status = "+value);
-#endif
-      if(IsHandleCreated&&!IsDisposed)try{BeginInvoke((Action)(()=>{if(!IsDisposed){footer.Text=value;trayStatus.Text=value;UpdateTray();}}));}catch{}
-    }
+    void Note(string value){Post(()=>{receiverStatus=value;trayStatus.Text=L.T(value);Publish();});}
     void UpdateTray(){
-      string d=deluxValue.Text, j=jblValue.Text;
+      string d=L.T(readings[0]), j=L.T(readings[1]);trayStatus.Text=L.T(receiverStatus);
       trayDelux.Text="DELUX M800 Mini: "+d; trayJbl.Text="JBL Quantum 650: "+j;
       trayMouse.Text=TrayTip("Mouse DELUX M800 Mini: "+d);trayHeadset.Text=TrayTip("Headset JBL Quantum 650: "+j);
       UpdateTrayIcon(trayMouse,ref trayMouseIcon,d,false);UpdateTrayIcon(trayHeadset,ref trayHeadsetIcon,j,true);
@@ -337,10 +429,10 @@ namespace Volti {
         bool mouse=u.Contains("VID_1D57&PID_FA60&MI_02&COL03");
         bool jbl=u.Contains("VID_0ECB&PID_2125&MI_05&COL04");
         if(!mouse&&!jbl)continue;
-        if(mouse){foundMouse=true;Set(deluxValue,L.T("Reading..."));StartReader(()=>ReadDelux(path));}
-        if(jbl){foundJbl=true;Set(jblValue,L.T("Reading..."));StartReader(()=>ReadJbl(path));}
+        if(mouse){foundMouse=true;Set(false,"Reading...");StartReader(()=>ReadDelux(path));}
+        if(jbl){foundJbl=true;Set(true,"Reading...");StartReader(()=>ReadJbl(path));}
       }
-      Note(!foundMouse&&!foundJbl?L.T("DELUX/JBL receivers not found."):foundMouse&&foundJbl?L.T("2.4 GHz readers active."):L.T("One receiver was not found."));
+      Note(!foundMouse&&!foundJbl?"DELUX/JBL receivers not found.":foundMouse&&foundJbl?"2.4 GHz readers active.":"One receiver was not found.");
     }
     void StartReader(ThreadStart action){lock(handles){if(stopping)return;var reader=new Thread(action){IsBackground=true,Name="Volti HID reader"};readers.Add(reader);reader.Start();}}
     IntPtr Open(string path,bool overlapped){
@@ -353,16 +445,16 @@ namespace Volti {
       finally {if(pp!=IntPtr.Zero)Win32.HidD_FreePreparsedData(pp);}
     }
     void ReadDelux(string path){
-      IntPtr h=Open(path,true); if(h==new IntPtr(-1)){Set(deluxValue,L.T("Access denied"));return;}
+      IntPtr h=Open(path,true); if(h==new IntPtr(-1)){Set(false,"Access denied");return;}
       byte[] report=new byte[5];
       while(!stopping){uint n;int result=Win32.ReadWithTimeout(h,report,out n,1000);if(result<0)break;if(result==0)continue;
         // M800 Mini: 03 29 40 01 NN; NN is the percentage returned by the receiver.
-        if(n>=5&&report[0]==0x03&&report[1]==0x29&&report[2]==0x40&&report[4]<=100)Set(deluxValue,report[4]+"%");
+        if(n>=5&&report[0]==0x03&&report[1]==0x29&&report[2]==0x40&&report[4]<=100)Set(false,report[4]+"%");
       }
-      if(!stopping)Set(deluxValue,L.T("Disconnected"));
+      if(!stopping)Set(false,"Disconnected");
     }
     void ReadJbl(string path){
-      IntPtr h=Open(path,true); if(h==new IntPtr(-1)){Set(jblValue,L.T("Access denied"));return;}
+      IntPtr h=Open(path,true); if(h==new IntPtr(-1)){Set(true,"Access denied");return;}
       int inputLength; int length=FeatureLength(h,out inputLength); byte[] input=new byte[inputLength]; bool gotBattery=false;
       DateTime nextQuery=DateTime.MinValue;
       while(!stopping){
@@ -374,22 +466,37 @@ namespace Volti {
           request[3]=0x01; request[4]=0x00; request[5]=0x01; request[6]=0x00;
           request[7]=0x02; request[8]=0x00; request[9]=0x0D; request[10]=0x00;
           nextQuery=now.AddSeconds(60);
-          if(!Win32.HidD_SetFeature(h,request,(uint)request.Length)&&!stopping&&!gotBattery)Set(jblValue,L.T("No response"));
+          if(!Win32.HidD_SetFeature(h,request,(uint)request.Length)&&!stopping&&!gotBattery)Set(true,"No response");
         }
         double remaining=(nextQuery-DateTime.UtcNow).TotalMilliseconds;
         uint timeout=(uint)Math.Max(1,Math.Min(60000,remaining));
-        uint n; int read=Win32.ReadWithTimeout(h,input,out n,timeout); if(read<0){if(!stopping&&!gotBattery)Set(jblValue,L.T("No response"));break;} if(read==0){if(!gotBattery)Set(jblValue,L.T("No response"));continue;} if(n<10)continue;
+        uint n; int read=Win32.ReadWithTimeout(h,input,out n,timeout); if(read<0){if(!stopping&&!gotBattery)Set(true,"No response");break;} if(read==0){if(!gotBattery)Set(true,"No response");continue;} if(n<10)continue;
         // A GET reply carries status (2 bytes), FeatureID (2), value length (2), then the value.
         ushort route=(ushort)(input[1]|(input[2]<<8)); ushort command=(ushort)(input[3]|(input[4]<<8)); ushort payload=(ushort)(input[7]|(input[8]<<8));
         if(input[0]==0x86&&route==0xDD00&&command==0x0001&&payload>=7&&n>=(uint)(9+payload)){
           ushort status=(ushort)(input[9]|(input[10]<<8)); ushort feature=(ushort)(input[11]|(input[12]<<8)); ushort valueLength=(ushort)(input[13]|(input[14]<<8));
           if((status&0x8000)==0&&feature==0x000D&&valueLength==1){
-            byte info=input[15]; byte percent=(byte)(info&0x7F); if(percent<=100){gotBattery=true;Set(jblValue,percent+"%"+((info&0x80)!=0?"  ⚡":""));}
+            byte info=input[15]; byte percent=(byte)(info&0x7F); if(percent<=100){gotBattery=true;Set(true,percent+"%"+((info&0x80)!=0?"  ⚡":""));}
           }
         }
       }
-      if(!stopping&&!gotBattery)Set(jblValue,L.T("Disconnected"));
+      if(!stopping&&!gotBattery)Set(true,"Disconnected");
     }
   }
-  static class Program { [STAThread] static void Main(){Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);bool owner;using(var instance=new Mutex(true,"Local\\Volti.App",out owner)){if(!owner)return;Application.Run(new MainForm());}} }
+  static class Program {
+    [STAThread] static void Main(){
+#if VOLTI_PANEL
+      bool panel=true;
+#else
+      bool panel=false;
+#endif
+      bool owner;
+      using(var instance=new Mutex(true,panel?"Local\\Volti.Panel":"Local\\Volti.App",out owner)){
+        if(!owner){if(panel)using(var link=new PanelLink())link.Activate.Set();return;}
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        Application.Run(new MainForm(panel));
+      }
+    }
+  }
 }

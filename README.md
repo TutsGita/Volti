@@ -6,14 +6,20 @@
 
 Volti is a small Windows system tray application that monitors battery levels from supported wireless mouse and headset receivers.
 
-**Preview release · 0.1.0-preview.1**
+**Version 0.2.0**
+
+See [the changelog](CHANGELOG.md) for release highlights.
 
 ## Features
 
 - Separate mouse and headset tray indicators, tinted by battery percentage.
 - Per-device low and critical battery notifications with configurable thresholds.
 - Black, White, Gruvbox and Nord themes with matching battery colors.
-- English and Brazilian Portuguese, selectable in Settings → Language.
+- English, Brazilian Portuguese and Simplified Chinese, selectable in Settings → Language.
+- Separate tray and panel processes. Closing the panel releases its process while monitoring continues.
+- About 60% lower private RAM use in tray-only mode compared with keeping both processes open, measured locally.
+- Bluetooth battery discovery through Windows device properties, refreshed every minute.
+- Per-device tray visibility controls and a manual Bluetooth detection button.
 - Optional startup through Windows Startup apps.
 - Per-user installer, uninstaller and portable package.
 
@@ -26,17 +32,17 @@ Volti is a small Windows system tray application that monitors battery levels fr
 | DELUX M800 Mini | Proprietary USB 2.4 GHz receiver | Receiver battery reports |
 | JBL Quantum 650 | Proprietary USB 2.4 GHz receiver | HID feature query, approximately once per minute |
 
-These implementations target specific receiver interfaces. Other models, firmware revisions, Bluetooth connections and generic wireless devices require separate validation. The original prototype returned battery values from these two devices. The preview packaging, language changes and non-elevated startup still need a complete hardware test before a stable release.
+The two USB receiver readers target specific device interfaces. Bluetooth support reads battery percentages exposed by Windows device properties. Devices that do not expose that property require another reader. End-to-end Bluetooth battery validation on a compatible physical device remains pending.
 
 ## Install and use
 
-Download the [Windows installer](https://github.com/TutsGita/Volti/releases/download/v0.1.0-preview.1/Volti-0.1.0-preview.1-Setup.exe) from [Releases](https://github.com/TutsGita/Volti/releases). The installer places the application under the current user's Local AppData, adds a Start menu shortcut and offers optional desktop and startup shortcuts. Startup is off by default. Inno Setup is only needed to build the installer from source.
+Download the [Windows installer](https://github.com/TutsGita/Volti/releases/download/v0.2.0/Volti-0.2.0-Setup.exe) from [Releases](https://github.com/TutsGita/Volti/releases). The installer places the application under the current user's Local AppData, adds a Start menu shortcut and offers optional desktop and startup shortcuts. Startup is off by default. Inno Setup is only needed to build the installer from source.
 
 For portable use, extract the entire portable ZIP and keep `assets` beside `Volti.exe`.
 
-Volti opens in the system tray. Double-click either device indicator to open the panel. Right-click an indicator to open the panel or exit. Closing the panel hides it in the tray. The gear at the bottom left opens Settings.
+Volti opens in the system tray. Double-click either device indicator to open the panel. Right-click an indicator to open the panel or exit. Closing the panel terminates Volti.UI.exe while Volti.exe continues monitoring. The gear at the bottom left opens Settings.
 
-Each device card has **Low (%)** and **Critical (%)** limits. Critical must be lower than Low. Each warning level fires when the battery enters that range and rearms when the battery rises above it. Preferences are stored under `HKCU\Software\Volti`.
+The DELUX and JBL receiver cards have **Low (%)** and **Critical (%)** limits. Bluetooth cards currently show battery level and tray visibility. Critical must be lower than Low. Each warning level fires when the battery enters that range and rearms when the battery rises above it. Preferences are stored under `HKCU\Software\Volti`.
 
 ## Startup and permissions
 
@@ -44,7 +50,6 @@ The installer and app run with the current user's permissions. The optional star
 
 HID access depends on the receiver's permissions and availability. If the panel reports **Access denied**, test a manual elevated launch. A receiver that requires elevation cannot be assumed to work through ordinary non-elevated startup. Close conflicting manufacturer software when investigating access failures.
 
-Older Pulso Duo scheduled tasks are only migrated when the startup setting is changed in the app. Removing an elevated legacy task may require one manual elevated launch. Keep the old app closed during migration.
 
 ## Build from source
 
@@ -54,7 +59,7 @@ Use Windows 10 or 11 with .NET Framework 4.8 installed. The build script uses th
 .\scripts\build.ps1
 ```
 
-The output is `build\Volti\Volti.exe` with its required assets and notices. If your system blocks local scripts, review the script and use your organization's approved PowerShell execution policy.
+The output contains `build\Volti\Volti.exe` and `Volti.UI.exe` with their required assets and notices. Keep both executables together. If your system blocks local scripts, review the script and use your organization's approved PowerShell execution policy.
 
 To build the installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php) and run
 
