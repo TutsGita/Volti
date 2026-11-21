@@ -7,6 +7,22 @@ namespace Volti {
   static class L {
     internal static string Language="en";
     static readonly Dictionary<string,string> Portuguese=new Dictionary<string,string>{
+      {"Battery", "Bateria"},
+      {"Minimize", "Minimizar"},
+      {"Close", "Fechar"},
+      {"Battery reading unavailable", "Leitura de bateria indisponível"},
+      {"Cloud Stinger Wireless detected. Battery reading unavailable.", "Cloud Stinger Wireless detectado. Leitura de bateria indisponível."},
+      {"Controller", "Controle"},
+      {"Empty", "Vazio"},
+      {"Low", "Baixo"},
+      {"Medium", "Médio"},
+      {"Full", "Cheio"},
+      {"Battery access unavailable. Try detecting again.", "Acesso à bateria indisponível. Tente detectar novamente."},
+
+      {"Windows taskbar settings", "Configurações da barra de tarefas do Windows"},
+      {"Could not open Windows taskbar settings.", "Não foi possível abrir as configurações da barra de tarefas."},
+      {"No battery readings yet", "Nenhuma leitura de bateria disponível"},
+      {"Options", "Opções"},
       {"Black", "Preto"},
       {"White", "Branco"},
       {"Language", "Idioma"},
@@ -53,6 +69,22 @@ namespace Volti {
       {"Readers", "Leitores"},
     };
     static readonly Dictionary<string,string> Chinese=new Dictionary<string,string>{
+      {"Battery", "电量"},
+      {"Minimize", "最小化"},
+      {"Close", "关闭"},
+      {"Battery reading unavailable", "无法读取电量"},
+      {"Cloud Stinger Wireless detected. Battery reading unavailable.", "已检测到 Cloud Stinger Wireless。暂无法读取电量。"},
+      {"Controller", "手柄"},
+      {"Empty", "空"},
+      {"Low", "低"},
+      {"Medium", "中"},
+      {"Full", "满"},
+      {"Battery access unavailable. Try detecting again.", "无法读取电量。请重新检测。"},
+
+      {"Options", "选项"},
+      {"No battery readings yet", "暂无电量读数"},
+      {"Windows taskbar settings", "Windows 任务栏设置"},
+      {"Could not open Windows taskbar settings.", "无法打开 Windows 任务栏设置。"},
       {"Detect devices", "检测设备"},
       {"Detection requested", "已请求检测"},
       {"Show in tray", "在托盘中显示"},

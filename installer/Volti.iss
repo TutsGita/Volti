@@ -1,5 +1,10 @@
 ﻿; SPDX-License-Identifier: AGPL-3.0-only
-#define AppVersion "0.2.0"
+#ifndef AppVersion
+  #define AppVersion "0.3.3"
+#endif
+#ifndef BuildDir
+  #define BuildDir "..\build\Volti"
+#endif
 [Setup]
 AppId={{C09F5E69-BD13-420C-AAB7-79630B2658CF}
 AppName=Volti
@@ -28,7 +33,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 Name: "startup"; Description: "Start Volti with Windows"; Flags: unchecked
 
 [Files]
-Source: "..\build\Volti\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#BuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Volti"; Filename: "{app}\Volti.exe"

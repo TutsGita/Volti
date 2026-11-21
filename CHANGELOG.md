@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.3
+
+- Rebuilt the panel around the GymOrganizer palette, header card and bottom navigation. Existing theme preferences carry over and newly created profiles use the GymOrganizer theme.
+- Added local Razer Synapse 3 and 4 log readers, including charging and per-device tray indicators.
+- Added experimental HyperX Pulsefire Haste 2 Wireless battery reading and a diagnostic card for the original PS4 Stinger.
+- Kept discovered readings and Bluetooth cards synchronized between the tray monitor and panel. Added level icons for discovered devices.
+- Recorded NGENUITY inspection results and protocol sources in the third-party notices and source package.
+- Fixed Bluetooth card sizing, startup localization and empty Synapse snapshots in the rebuilt panel.
+
+## 0.3.2
+
+- Rounded and aligned the window, cards, navigation and theme tiles. Added Dracula.
+- Detects the original HyperX Cloud Stinger Wireless PS4 receiver (0951:16DA). Battery reading is pending protocol verification.
+
+- Compact device overview and tray icons driven by valid readings. Manual detection also discovers reconnected USB receivers.
+
+## 0.3.1
+
+- Added battery queries for Cloud Stinger 2 Wireless and three Cloud Stinger Core Wireless receivers. Physical validation in Volti is pending.
+- Added a tray shortcut to Windows taskbar settings.
+
+## 0.3.0
+
+- Matched the device panel scrollbar to the active theme and added a Frutiger Aero palette.
+- Added passive receiver readers for Attack Shark R1, X6, X11 and X11 SE, DELUX M600 Pro, Rapoo MT760 Mini and JBL Quantum 910 Wireless.
+- Show receiver cards and tray entries after a valid battery percentage. The new readers send no HID requests and use no external runtime dependencies.
+- Credited protocol sources in THIRD_PARTY_NOTICES.md. Physical validation of the new readers in Volti is pending.
+
 ## 0.2.0 · November 20, 2026
 
 ### ⚡ Lighter in the background

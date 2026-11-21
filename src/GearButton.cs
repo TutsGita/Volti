@@ -5,7 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace Volti {
-  sealed class GearButton : Button {
+  sealed class GearButton : RoundedButton {
     protected override void OnPaint(PaintEventArgs e){
       base.OnPaint(e);
       e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;

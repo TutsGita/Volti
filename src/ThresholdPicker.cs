@@ -17,7 +17,7 @@ namespace Volti {
       SetStyle(ControlStyles.SupportsTransparentBackColor,true);
       SetBounds(left,98,150,32);
       input=new TextBox{BorderStyle=BorderStyle.None,Left=11,Top=7,Width=80,AccessibleName=name};
-      arrow=new Button{Text="⌄",Left=114,Top=3,Width=31,Height=26,FlatStyle=FlatStyle.Flat,AccessibleName=name,Cursor=Cursors.Hand};
+      arrow=new RoundedButton{Text="⌄",Left=114,Top=3,Width=31,Height=26,FlatStyle=FlatStyle.Flat,AccessibleName=name,Cursor=Cursors.Hand};
       arrow.FlatAppearance.BorderSize=0;
       choices=new ContextMenuStrip{Renderer=new BatteryMenuRenderer(),ShowImageMargin=false};
       Controls.Add(input);Controls.Add(arrow);
