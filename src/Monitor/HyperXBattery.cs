@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: AGPL-3.0-only
 // HyperX protocol adapted from HyperBatteryMonitor. See THIRD_PARTY_NOTICES.md.
 using System;
 using System.Collections.Generic;
@@ -29,8 +29,6 @@ namespace Volti {
     static extern uint CM_Get_Device_Interface_List_Size(out uint length, ref Guid guid, string instance, uint flags);
     [DllImport("cfgmgr32.dll", CharSet=CharSet.Unicode)]
     static extern uint CM_Get_Device_Interface_List(ref Guid guid, string instance, [Out] char[] buffer, uint length, uint flags);
-    [DllImport("hid.dll")]
-    static extern bool HidD_GetFeature(IntPtr handle, byte[] report, uint length);
 
     internal static string[] Paths() {
       var guid = HidClass;
@@ -92,7 +90,7 @@ namespace Volti {
       bool secondGeneration=Matches(path,Stinger2);
       bool haste2=IsHaste2(path);
       IntPtr handle=Win32.CreateFile(path,0xC0000000,3,IntPtr.Zero,3,
-        secondGeneration||haste2?0x40000000u:0u,IntPtr.Zero);
+        0x40000000u,IntPtr.Zero);
       if(handle==new IntPtr(-1))return -1;
       try {
         IntPtr data;
@@ -116,11 +114,11 @@ namespace Volti {
         var request=new byte[length];
         var reply=new byte[length];
         Array.Copy(CoreConnection,request,CoreConnection.Length);
-        if(!Win32.HidD_SetFeature(handle,request,(uint)length) ||
+        if(!Feature(handle,request,true) ||
           !ReadFeature(handle,reply) || reply[11]!=1)return -1;
         Array.Clear(request,0,length);
         Array.Copy(CoreRequest,request,CoreRequest.Length);
-        if(!Win32.HidD_SetFeature(handle,request,(uint)length))return -1;
+        if(!Feature(handle,request,true))return -1;
         bool strict=!Matches(path,Kingston);
         for(int attempt=0;attempt<(strict?10:1);attempt++) {
           if(!ReadFeature(handle,reply))break;
@@ -146,11 +144,17 @@ namespace Volti {
       return -1;
     }
 
+    static bool Feature(IntPtr handle,byte[] report,bool write) {
+      // hidclass.h: IOCTL_HID_SET_FEATURE and IOCTL_HID_GET_FEATURE.
+      uint transferred;
+      return Win32.TransferWithTimeout(handle,report,out transferred,400,write,IntPtr.Zero,write?0xB0191u:0xB0192u)==1;
+    }
+
     static bool ReadFeature(IntPtr handle,byte[] reply) {
       Thread.Sleep(20);
       Array.Clear(reply,0,reply.Length);
       reply[0]=0xFF;
-      return HidD_GetFeature(handle,reply,(uint)reply.Length);
+      return Feature(handle,reply,false);
     }
 
     static int QueryStinger2(IntPtr handle,byte[] caps) {
@@ -170,43 +174,6 @@ namespace Volti {
         if(percent>=0)return percent;
       }
       return -1;
-    }
-  }
-
-  sealed partial class MainForm {
-    readonly HashSet<string> hyperXReceivers=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    bool scanningHyperX;
-
-    void DetectHyperX() {
-      if(scanningHyperX)return;
-      scanningHyperX=true;
-      ThreadPool.QueueUserWorkItem(_=>{
-        var readings=new Dictionary<string,KeyValuePair<string,int>>(StringComparer.OrdinalIgnoreCase);
-        try {
-          foreach(string path in HyperXBattery.Paths()) {
-            if(stopping)break;
-            if(HyperXBattery.IsOriginalStinger(path)) {
-              readings["hyperx-stinger-0951-16da"]=new KeyValuePair<string,int>("HyperX Cloud Stinger Wireless (PS4)",-1);
-              continue;
-            }
-            string name=HyperXBattery.DeviceName(path);
-            if(name==null || readings.ContainsKey(path))continue;
-            int percent=HyperXBattery.Query(path);
-            if(percent>=0)readings.Add(path,new KeyValuePair<string,int>(name,percent));
-          }
-        } finally {
-          Post(()=>{
-            foreach(string path in hyperXReceivers)
-              if(!readings.ContainsKey(path))SetReceiverBattery(path,null,0);
-            hyperXReceivers.Clear();
-            foreach(var reading in readings) {
-              hyperXReceivers.Add(reading.Key);
-              SetReceiverBattery(reading.Key,reading.Value.Key,reading.Value.Value);
-            }
-            scanningHyperX=false;
-          });
-        }
-      });
     }
   }
 }

@@ -2,7 +2,7 @@
 
 ## MingCute device icons
 
-Mouse and headphone icons are from MingCute, supplied through SVG Repo.
+The legacy mouse and headphone image files are from MingCute, supplied through SVG Repo. Since 0.5.0 the panel and tray draw original scalable mouse and headset outlines in DeviceArt.
 
 - Upstream project https://github.com/mingcute-design/mingcute-icons
 - License Apache License 2.0, included in `assets/LICENSE-MingCute.txt`
@@ -117,3 +117,11 @@ Static inspection used the embedded app ZIP64 archive beginning at offset 306783
 | Pulsefire Haste 2 Wireless | Haste 2 Wireless support symbols in this installer. The packet format comes from separate NGENUITY 3.1 research | Experimental reader for `03F0:0D97` / `03F0:0F98` |
 
 String matches identify candidates and do not establish a working protocol. The Haste 2 reader uses the connection and battery queries documented by [PMarinov1994/ngenuity-linux-cli](https://github.com/PMarinov1994/ngenuity-linux-cli) and [Halo Battery contributors](https://github.com/HeyOkay/HaloBattery/blob/main/docs/protocols.md#hyperx-pulsefire-haste-2-wireless-ngenuity-protocol). It was implemented in Volti with an interface and report-length check. No vendor binaries, resources or decompiled code are redistributed.
+
+## Color palette references
+
+Volti adapts colors from [Rosé Pine](https://rosepinetheme.com/palette/) and [Catppuccin Macchiato](https://catppuccin.com/palette/). Additional palette references include [SynthWave ’84](https://github.com/robb0wen/synthwave-vscode) and [Tokyo Night](https://github.com/enkia/tokyo-night-vscode-theme). Volti draws its own icon styles.
+
+## Device icon references
+
+The WinForms device glyphs are drawn by Volti. Visual references include the [Lucide keyboard](https://lucide.dev/icons/keyboard), [headphones](https://lucide.dev/icons/headphones), [gamepad](https://lucide.dev/icons/gamepad-2) and [speaker](https://lucide.dev/icons/speaker).

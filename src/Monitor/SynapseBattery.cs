@@ -20,14 +20,45 @@ namespace Volti {
     static readonly Regex Level = new Regex(@"\blevel\s+(\d+)(?:\s+state\s+(\d+))?", RegexOptions.IgnoreCase);
     static readonly Regex V4File = new Regex(@"^systray_systrayv\d+\.log$", RegexOptions.IgnoreCase);
 
-    static string Tail(string path) {
-      if(File.GetLastWriteTimeUtc(path) < DateTime.UtcNow.AddMinutes(-15))return "";
-      using(var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
-        stream.Position = Math.Max(0, stream.Length - MaxLogBytes);
-        using(var reader = new StreamReader(stream, Encoding.UTF8)) {
-          if(stream.Position > 0)reader.ReadLine();
-          return reader.ReadToEnd();
+    sealed class CachedTail {
+      internal long Length;
+      internal DateTime Created, Written;
+      internal byte[] Bytes;
+      internal string Text;
+    }
+    static readonly Dictionary<string,CachedTail> tails=new Dictionary<string,CachedTail>(StringComparer.OrdinalIgnoreCase);
+
+    internal static string Tail(string path) {
+      var file=new FileInfo(path);
+      if(!file.Exists||file.LastWriteTimeUtc<DateTime.UtcNow.AddMinutes(-15)){lock(tails)tails.Remove(path);return "";}
+      CachedTail prior;
+      lock(tails)tails.TryGetValue(path,out prior);
+      using(var stream=file.Open(FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete)){
+        long length=stream.Length, start=Math.Max(0,length-MaxLogBytes);
+        bool same=prior!=null&&prior.Created==file.CreationTimeUtc;
+        if(same&&length==prior.Length&&file.LastWriteTimeUtc==prior.Written)return prior.Text;
+        var bytes=new byte[(int)(length-start)];
+        int copied=0;
+        if(same&&length>prior.Length&&start<prior.Length){
+          copied=(int)(prior.Length-start);
+          Buffer.BlockCopy(prior.Bytes,prior.Bytes.Length-copied,bytes,0,copied);
         }
+        stream.Position=start+copied;
+        using(var reader=new BinaryReader(stream)){
+          while(copied<bytes.Length){
+            int count=reader.Read(bytes,copied,bytes.Length-copied);
+            if(count==0){lock(tails)tails.Remove(path);return "";}
+            copied+=count;
+          }
+        }
+        int first=start==0?0:Array.IndexOf(bytes,(byte)10)+1;
+        if(start!=0&&first==0)first=bytes.Length;
+        string text=Encoding.UTF8.GetString(bytes,first,bytes.Length-first).TrimStart('﻿');
+        lock(tails){
+          if(prior==null&&tails.Count>=8)tails.Clear();
+          tails[path]=new CachedTail{Bytes=bytes,Text=text,Length=length,Created=file.CreationTimeUtc,Written=file.LastWriteTimeUtc};
+        }
+        return text;
       }
     }
 
@@ -36,16 +67,14 @@ namespace Volti {
       return data.TryGetValue(key,out value) && value != null ? Convert.ToString(value,CultureInfo.InvariantCulture) : "";
     }
 
-    static bool Recent(string stamp, DateTime now) {
-      DateTime time;
-      return !DateTime.TryParse(stamp,CultureInfo.InvariantCulture,DateTimeStyles.AssumeLocal,out time) ||
-        time.ToUniversalTime() >= now.AddMinutes(-15);
+    static bool Recent(string stamp, DateTime now,out DateTime time) {
+      return DateTime.TryParse(stamp,CultureInfo.InvariantCulture,DateTimeStyles.AssumeLocal,out time) &&
+        time.ToUniversalTime() >= now.AddMinutes(-15) && time.ToUniversalTime() <= now.AddMinutes(1);
     }
 
-    static string Row(string id, string name, int percent, bool charging) {
-      return Convert.ToBase64String(Encoding.UTF8.GetBytes(id)) + "\t" +
-        Convert.ToBase64String(Encoding.UTF8.GetBytes(name.Trim())) + "\t" +
-        percent.ToString(CultureInfo.InvariantCulture) + (charging ? "  ⚡" : "");
+    static string Row(string id, string name, int percent, bool charging,DateTime observed) {
+      string level=percent.ToString(CultureInfo.InvariantCulture)+(charging?"  ⚡":"");
+      return new DeviceReading(id,name.Trim(),level,Battery.MinuteStamp(observed)).Encode();
     }
 
     internal static string ParseV4(string log, DateTime now) {
@@ -54,11 +83,13 @@ namespace Volti {
         int start = line.IndexOf(marker,StringComparison.Ordinal);
         if(start < 0)continue;
         int bracket = line.IndexOf(']');
-        if(line.StartsWith("[") && bracket > 0 && !Recent(line.Substring(1,bracket-1),now))return "";
+        DateTime observed;
+        if(!line.StartsWith("[") || bracket<=1 || !Recent(line.Substring(1,bracket-1),now,out observed))continue;
         object json;
         try {json = new JavaScriptSerializer {MaxJsonLength=MaxLogBytes, RecursionLimit=24}.DeserializeObject(line.Substring(start+marker.Length));}
         catch(ArgumentException) {continue;}
         catch(InvalidOperationException) {continue;}
+        if(!(json is object[]) && !(json is Dictionary<string,object>))continue;
         var entries = json as object[] ?? new[] {json};
         var rows = new SortedDictionary<string,string>(StringComparer.Ordinal);
         foreach(object entry in entries) {
@@ -86,7 +117,7 @@ namespace Volti {
           if(id.Length == 0)id = Field(device,"deviceContainerId");
           if(id.Length == 0)id = name;
           string status = Field(power,"chargingStatus").Trim().ToLowerInvariant();
-          rows[id] = Row("synapse4:"+id,name,(int)Math.Round(percent,MidpointRounding.AwayFromZero),status=="charging"||status=="charge");
+          rows[id] = Row("synapse4:"+id,name,(int)Math.Round(percent,MidpointRounding.AwayFromZero),status=="charging"||status=="charge",observed);
         }
         return string.Join("\n",rows.Values);
       }
@@ -96,7 +127,8 @@ namespace Volti {
     internal static string ParseV3(string log, DateTime now) {
       var rows = new SortedDictionary<string,string>(StringComparer.Ordinal);
       foreach(Match entry in V3Event.Matches(log)) {
-        if(!Recent(entry.Groups["stamp"].Value,now))continue;
+        DateTime observed;
+        if(!Recent(entry.Groups["stamp"].Value,now,out observed))continue;
         string body = entry.Groups["body"].Value;
         var handle = Handle.Match(body);
         if(!handle.Success)continue;
@@ -110,20 +142,26 @@ namespace Volti {
         int percent, state;
         if(name.Success && level.Success && int.TryParse(level.Groups[1].Value,out percent) && percent<=100)
           rows[id] = Row("synapse3:"+name.Groups[1].Value.Trim()+":"+id,name.Groups[1].Value,percent,
-            int.TryParse(level.Groups[2].Value,out state) && state!=0);
+            int.TryParse(level.Groups[2].Value,out state) && state!=0,observed);
       }
       return string.Join("\n",rows.Values);
     }
 
     internal static string Scan() {
-      var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Razer");
+      return Scan(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Razer"));
+    }
+
+    internal static string Scan(string root) {
       var now = DateTime.UtcNow;
       try {
         string folder = Path.Combine(root,"RazerAppEngine","User Data","Logs");
         if(Directory.Exists(folder)) {
           foreach(var log in new DirectoryInfo(folder).EnumerateFiles("systray_systrayv*.log")
             .Where(file=>V4File.IsMatch(file.Name)).OrderByDescending(file=>file.LastWriteTimeUtc).Take(4)) {
-            string snapshot = ParseV4(Tail(log.FullName),now);
+            string snapshot;
+            try{snapshot=ParseV4(Tail(log.FullName),now);}
+            catch(IOException){continue;}
+            catch(UnauthorizedAccessException){continue;}
             if(snapshot != null)return snapshot;
           }
         }
