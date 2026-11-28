@@ -4,7 +4,7 @@ $root=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $out=Join-Path $root 'build/StingerToolkit'
 New-Item -ItemType Directory -Force $out | Out-Null
 $compiler=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-$files=(Get-ChildItem (Join-Path $root 'src') -Filter '*.cs').FullName
+$files=@('src/Shared/Win32.cs','src/Monitor/HyperXBattery.cs') | ForEach-Object {Join-Path $root $_}
 $entry=Join-Path $PSScriptRoot 'StingerToolkit.cs'
 $exe=Join-Path $out 'StingerToolkit.exe'
 & $compiler /nologo /target:exe /main:Volti.StingerToolkit /optimize+ /reference:System.Web.Extensions.dll "/out:$exe" $files $entry

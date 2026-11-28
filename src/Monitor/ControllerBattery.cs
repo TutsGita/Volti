@@ -21,7 +21,7 @@ namespace Volti {
         default:return null;
       }
     }
-    internal static string Scan() {
+    internal static string Scan(string observed) {
       var rows=new List<string>();
       for(uint slot=0;slot<4;slot++){
         BatteryInfo info;
@@ -29,8 +29,7 @@ namespace Volti {
         var level=Level(info.Type,info.Level);
         if(level==null)continue;
         string number=(slot+1).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        rows.Add(Convert.ToBase64String(Encoding.UTF8.GetBytes("xinput:"+number))+"\t"+
-          Convert.ToBase64String(Encoding.UTF8.GetBytes("Controller "+number))+"\t"+level);
+        rows.Add(new DeviceReading("xinput:"+number,"Controller "+number,level,observed).Encode());
       }
       return string.Join("\n",rows.ToArray());
     }

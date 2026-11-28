@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.6.0
+
+- Rebuilt the panel: resizable window that remembers its position, fixed tabs, a summary of devices and the lowest level, sorting, and one card style for every device with options shown inline.
+- Device cards show the connection, last reading, remaining time or charging state, and support inline renaming with F2.
+- Settings are grouped into General, Language, Devices and About, with switches, a language picker, a manual update check and a shortcut to the Windows taskbar settings.
+- Theme tiles preview each palette and its battery colours. Added keyboard shortcuts and focus outlines.
+- The tray menu lists every device reading. The tray preview shows remaining time.
+- Split the source into `src/Shared`, `src/Monitor` and `src/Panel`. Each executable now contains only its own code. Translations moved to `assets/lang/*.json`.
+- Added parser and state checks (`scripts/test.ps1`, `scripts/check.sh`) and a `--demo` panel mode.
+- The updater also accepts the release list format returned on Mono, requests TLS 1.2 and reports errors from a manual check. The installer restarts the monitor after an in-app update and skips the uninstaller for portable updates.
+
+## 0.5.0
+
+- Uses solid theme backgrounds, eases navigation transitions, and caps each batched history write at 64 KiB.
+
+- Added tray hover previews, device aliases, Rosé Pine and Catppuccin Macchiato themes, outline device icons and an option to turn off alerts.
+
+- Compact device panel with scalable mouse and headset icons.
+- Added themed battery alerts, compact controls for battery thresholds and a Blackout theme.
+- Remaining battery time learned from local percentage readings.
+- Optional updates from stable GitHub releases, with release highlights and SHA-256 verification.
+
+## 0.4.2
+
+- The panel clears readings when the monitor stops and can restart it. Device cards show the time of the last battery observation to the minute.
+- USB discovery runs after hardware changes and retries every minute. Shared mouse collections are matched by Windows container, and HyperX receivers are queried independently with cancellable feature requests.
+- Synapse skips expired or malformed timestamps, honors explicit disconnect snapshots and caches bounded log tails.
+- Packaging checks both executable versions against the application manifest. The installer, source and portable ZIPs are grouped by version.
+
+## 0.4.1
+
+- Updated the device panel with top navigation and Dracula as the default theme.
+- Fixed button rendering and aligned the Options control on device cards.
+- Improved the Windows taskbar icon.
+
 ## 0.3.3
 
 - Rebuilt the panel around the GymOrganizer palette, header card and bottom navigation. Existing theme preferences carry over and newly created profiles use the GymOrganizer theme.
